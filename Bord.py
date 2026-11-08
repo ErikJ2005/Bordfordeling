@@ -39,7 +39,7 @@ def les_navneliste(fil):
     stipper, elever = [], []
     for navn, r in zip(df["Elever"].fillna(""), rolle.fillna("")):
         navn, r = str(navn).strip(), str(r).strip().lower()
-        if not navn or r == "etasje":
+        if not navn:
             continue
         (stipper if r == "stipp" else elever).append(navn)
     return stipper, elever
@@ -91,7 +91,7 @@ st.caption(
 EKSEMPEL = pd.DataFrame({
     "Elever": ["Ola Nordmann", "Kari Hansen", "Per Olsen", "Lise Berg",
                "Ahmed Ali", "Sofie Lie", "Jonas Dahl", "Emma Moe"],
-    "Stipp": ["", "", "stipp", "", "", "stipp", "", "etasje"],
+    "Stipp": ["", "", "stipp", "", "", "stipp", "", ""],
 })
 
 
@@ -106,8 +106,8 @@ with st.expander("Hvordan skal fila se ut? (se eksempel)", expanded=True):
         "Last opp en Excel-fil (`.xlsx`) eller CSV. Første rad må være overskrifter:\n\n"
         "- **Elever** – ett navn per rad (påkrevd).\n"
         "- **Stipp** – valgfri. La cellen stå tom for vanlige elever, skriv `stipp` "
-        "for personer som skal spres utover bordene (helst én per bord), eller "
-        "`etasje` for personer som ikke skal ha bordplass."
+        "for personer som skal spres utover bordene (helst én per bord). "
+        "Alle i lista får bordplass."
     )
     eks1, eks2 = st.columns([2, 1])
     eks1.dataframe(EKSEMPEL, hide_index=True, width="stretch")
