@@ -88,11 +88,35 @@ st.caption(
     "åpen og forsvinner når du lukker fanen eller trykker «Nullstill»."
 )
 
-with st.expander("Hvordan skal fila se ut?"):
+EKSEMPEL = pd.DataFrame({
+    "Elever": ["Ola Nordmann", "Kari Hansen", "Per Olsen", "Lise Berg",
+               "Ahmed Ali", "Sofie Lie", "Jonas Dahl", "Emma Moe"],
+    "Stipp": ["", "", "stipp", "", "", "stipp", "", "etasje"],
+})
+
+
+def lag_eksempelfil():
+    buf = io.BytesIO()
+    EKSEMPEL.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()
+
+
+with st.expander("Hvordan skal fila se ut? (se eksempel)", expanded=True):
     st.markdown(
-        "Excel (`.xlsx`) eller CSV med kolonnen **Elever** (navn). Valgfri kolonne "
-        "**Stipp**: skriv `stipp` for personer som skal spres utover bordene "
-        "(helst én per bord) eller `etasje` for personer som ikke skal ha bordplass."
+        "Last opp en Excel-fil (`.xlsx`) eller CSV. Første rad må være overskrifter:\n\n"
+        "- **Elever** – ett navn per rad (påkrevd).\n"
+        "- **Stipp** – valgfri. La cellen stå tom for vanlige elever, skriv `stipp` "
+        "for personer som skal spres utover bordene (helst én per bord), eller "
+        "`etasje` for personer som ikke skal ha bordplass."
+    )
+    eks1, eks2 = st.columns([2, 1])
+    eks1.dataframe(EKSEMPEL, hide_index=True, width="stretch")
+    eks2.markdown("Slik ser fila ut i Excel. Last ned eksempelet, bytt ut navnene "
+                  "og last det opp igjen.")
+    eks2.download_button(
+        "Last ned eksempelfil", lag_eksempelfil(), file_name="Eksempel_navneliste.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        width="stretch",
     )
 
 elevfil = st.file_uploader("Last opp navneliste", type=["xlsx", "csv"])
