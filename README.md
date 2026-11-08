@@ -21,11 +21,12 @@ Excel (`.xlsx`) eller CSV med kolonnene:
 |--------|-------|
 | Ola    |       |
 | Kari   | stipp |
-| Per    | etasje |
+| Per    |       |
 
 - `stipp`: spres jevnt utover bordene (helst én per bord).
-- `etasje`: får ikke bordplass.
 - Tom: vanlig elev.
+
+Alle som står i lista får bordplass.
 
 ## Publisere gratis med GitHub Pages (anbefalt)
 
