@@ -97,25 +97,25 @@ def _straff(antall_ganger: int) -> float:
     return float(antall_ganger * antall_ganger)
 
 
-def _fordel_en_uke(antall_stipper, n, plan, treff, rng, iterasjoner):
-    """Returnerer (bord_for_person, kostnad) for én uke."""
-    T = len(plan)
-    W = [[_straff(c) for c in rad] for rad in treff]
+def _fordel_en_uke(antall_stipper, plan, W, rng, iterasjoner):
+    """Returnerer (bord_for_person, kostnad) for én uke.
 
-    # Startløsning: tilfeldig, men respekterer stipp-/elevplasser
-    stipper = list(range(antall_stipper))
-    elever = list(range(antall_stipper, n))
-    rng.shuffle(stipper)
-    rng.shuffle(elever)
+    ``W[i][j]`` er straffen for at i og j sitter ved samme bord.
+    """
+    T = len(plan)
+    n = len(W)
+
+    # Startløsning: tilfeldig, men respekterer stipp-/elevplasser.
+    # Gruppene brukes også senere: bare personer i samme gruppe byttes.
+    grupper = [list(range(antall_stipper)), list(range(antall_stipper, n))]
+    for g in grupper:
+        rng.shuffle(g)
+    koer = [iter(g) for g in grupper]
     bord_for = [0] * n
-    si = ei = 0
     for b, p in enumerate(plan):
-        for _ in range(p.stipp_plasser):
-            bord_for[stipper[si]] = b
-            si += 1
-        for _ in range(p.elev_plasser):
-            bord_for[elever[ei]] = b
-            ei += 1
+        for ko, plasser in zip(koer, (p.stipp_plasser, p.elev_plasser)):
+            for _ in range(plasser):
+                bord_for[next(ko)] = b
 
     # S[p][b] = sum av straff mellom p og alle ved bord b
     S = [[0.0] * T for _ in range(n)]
@@ -128,7 +128,7 @@ def _fordel_en_uke(antall_stipper, n, plan, treff, rng, iterasjoner):
     if kostnad == 0 or iterasjoner <= 0 or T < 2:
         return bord_for, kostnad
 
-    grupper = [g for g in (list(range(antall_stipper)), list(range(antall_stipper, n))) if len(g) > 1]
+    grupper = [g for g in grupper if len(g) > 1]
     if not grupper:
         return bord_for, kostnad
     vekter = [len(g) for g in grupper]
@@ -187,9 +187,10 @@ def generer_uker(stipper, elever, plasser_per_bord, minimum, antall_uker,
 
     for uke in range(antall_uker):
         plan = lag_bordplan(ns, n - ns, plasser_per_bord, minimum, rng)
+        W = [[_straff(c) for c in rad] for rad in treff]
         beste, beste_kost = None, float("inf")
         for _ in range(omstarter):
-            bord_for, kost = _fordel_en_uke(ns, n, plan, treff, rng, iterasjoner)
+            bord_for, kost = _fordel_en_uke(ns, plan, W, rng, iterasjoner)
             if kost < beste_kost:
                 beste, beste_kost = bord_for, kost
             if beste_kost <= 0:
@@ -219,17 +220,10 @@ def statistikk(navn, treff):
     n = len(navn)
     per_person = []
     gjentatte_par = 0
-    maks = 0
     for i in range(n):
         ulike = sum(1 for j in range(n) if j != i and treff[i][j] > 0)
         per_person.append((navn[i], ulike))
         for j in range(i + 1, n):
-            c = treff[i][j]
-            if c > 1:
+            if treff[i][j] > 1:
                 gjentatte_par += 1
-            maks = max(maks, c)
-    return {
-        "per_person": per_person,
-        "gjentatte_par": gjentatte_par,
-        "maks_sammen": maks,
-    }
+    return {"per_person": per_person, "gjentatte_par": gjentatte_par}
