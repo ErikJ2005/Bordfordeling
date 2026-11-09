@@ -5,7 +5,6 @@
 # Publisert via index.html (stlite) kjører hele appen i brukerens nettleser,
 # så navnene sendes ikke til noen server i det hele tatt.
 
-import csv
 import io
 import zipfile
 
@@ -17,6 +16,7 @@ from fordeling import FordelingsFeil, generer_uker
 st.set_page_config(page_title="Bordfordeling", layout="wide")
 
 INNSATS = {"Rask": 0.25, "Normal": 0.6, "Grundig": 1.5}
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def les_navneliste(fil):
@@ -45,39 +45,31 @@ def les_navneliste(fil):
     return stipper, elever
 
 
-def lag_csv(bordliste):
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow([f"Bord {nr}" for nr, _ in bordliste])
-    lengst = max(len(m) for _, m in bordliste)
-    for rad in range(lengst):
-        w.writerow([m[rad] if rad < len(m) else "" for _, m in bordliste])
-    # BOM gjør at Excel viser æ, ø og å riktig
-    return "﻿" + buf.getvalue()
-
-
 def som_dataframe(bordliste):
+    """Én kolonne per bord, kortere bord fylles ut med tomme celler."""
     lengst = max(len(m) for _, m in bordliste)
     return pd.DataFrame({
         f"Bord {nr}": m + [""] * (lengst - len(m)) for nr, m in bordliste
     })
 
 
-def lag_zip(uker, start_uke):
+def lag_excel(ark):
+    """Lager en Excel-fil i minnet. ``ark`` er {arknavn: DataFrame}."""
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for i, bordliste in enumerate(uker):
-            z.writestr(f"Bordfordeling_uke{start_uke + i}.csv", lag_csv(bordliste))
+    with pd.ExcelWriter(buf, engine="openpyxl") as xl:
+        for navn, df in ark.items():
+            df.to_excel(xl, sheet_name=navn, index=False)
     return buf.getvalue()
 
 
-def lag_excel(uker, start_uke, stat):
+def lag_zip(tabeller):
+    """Én CSV per uke. ``tabeller`` er {ukenavn: DataFrame}."""
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as xl:
-        for i, bordliste in enumerate(uker):
-            som_dataframe(bordliste).to_excel(xl, sheet_name=f"Uke {start_uke + i}", index=False)
-        pd.DataFrame(stat["per_person"], columns=["Navn", "Antall ulike bordkamerater"]) \
-            .to_excel(xl, sheet_name="Oversikt", index=False)
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for navn, df in tabeller.items():
+            # utf-8-sig (BOM) gjør at Excel viser æ, ø og å riktig
+            z.writestr(f"Bordfordeling_{navn.replace(' ', '_')}.csv",
+                       df.to_csv(index=False).encode("utf-8-sig"))
     return buf.getvalue()
 
 
@@ -95,12 +87,6 @@ EKSEMPEL = pd.DataFrame({
 })
 
 
-def lag_eksempelfil():
-    buf = io.BytesIO()
-    EKSEMPEL.to_excel(buf, index=False, engine="openpyxl")
-    return buf.getvalue()
-
-
 with st.expander("Hvordan skal fila se ut? (se eksempel)", expanded=True):
     st.markdown(
         "Last opp en Excel-fil (`.xlsx`) eller CSV. Første rad må være overskrifter:\n\n"
@@ -114,9 +100,8 @@ with st.expander("Hvordan skal fila se ut? (se eksempel)", expanded=True):
     eks2.markdown("Slik ser fila ut i Excel. Last ned eksempelet, bytt ut navnene "
                   "og last det opp igjen.")
     eks2.download_button(
-        "Last ned eksempelfil", lag_eksempelfil(), file_name="Eksempel_navneliste.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        width="stretch",
+        "Last ned eksempelfil", lag_excel({"Navneliste": EKSEMPEL}),
+        file_name="Eksempel_navneliste.xlsx", mime=XLSX_MIME, width="stretch",
     )
 
 elevfil = st.file_uploader("Last opp navneliste", type=["xlsx", "csv"])
@@ -172,15 +157,17 @@ if knapp1.button("Generer bordfordeling", type="primary", width="stretch"):
         st.error(f"Kunne ikke lese fila: {type(e).__name__}")
         st.stop()
 
+    tabeller = {f"Uke {int(start_uke) + i}": som_dataframe(b) for i, b in enumerate(uker)}
+    oversikt = pd.DataFrame(stat["per_person"], columns=["Navn", "Antall ulike bordkamerater"])
     st.session_state["resultat"] = {
-        "uker": uker, "stat": stat, "start": int(start_uke),
-        "zip": lag_zip(uker, int(start_uke)),
-        "xlsx": lag_excel(uker, int(start_uke), stat),
+        "tabeller": tabeller, "stat": stat,
+        "zip": lag_zip(tabeller),
+        "xlsx": lag_excel({**tabeller, "Oversikt": oversikt}),
     }
 
 res = st.session_state.get("resultat")
 if res:
-    stat, uker = res["stat"], res["uker"]
+    stat, tabeller = res["stat"], res["tabeller"]
     ulike = [u for _, u in stat["per_person"]]
     st.success("Bordfordeling generert!")
     m1, m2, m3 = st.columns(3)
@@ -190,12 +177,10 @@ if res:
 
     d1, d2 = st.columns(2)
     d1.download_button("Last ned Excel (alle uker)", res["xlsx"],
-                       file_name="Bordfordeling.xlsx", width="stretch",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                       file_name="Bordfordeling.xlsx", mime=XLSX_MIME, width="stretch")
     d2.download_button("Last ned alle ukene som ZIP (CSV)", res["zip"],
                        file_name="Alle_bordfordelinger.zip", mime="application/zip",
                        width="stretch")
 
-    faner = st.tabs([f"Uke {res['start'] + i}" for i in range(len(uker))])
-    for fane, bordliste in zip(faner, uker):
-        fane.dataframe(som_dataframe(bordliste), hide_index=True, width="stretch")
+    for fane, df in zip(st.tabs(list(tabeller)), tabeller.values()):
+        fane.dataframe(df, hide_index=True, width="stretch")
