@@ -15,7 +15,6 @@ from fordeling import FordelingsFeil, generer_uker
 
 st.set_page_config(page_title="Bordfordeling", layout="wide")
 
-INNSATS = {"Rask": 0.25, "Normal": 0.6, "Grundig": 1.5}
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
@@ -111,10 +110,6 @@ antall_bord = col1.number_input("Antall bord", min_value=1, max_value=60, value=
 minimum = col1.number_input("Minimum personer per bord", min_value=1, max_value=8, value=4)
 start_uke = col1.number_input("Første uke", min_value=1, max_value=52, value=1)
 slutt_uke = col1.number_input("Siste uke", min_value=1, max_value=52, value=1)
-innsats = col1.select_slider(
-    "Søkeinnsats", options=list(INNSATS), value="Normal",
-    help="Grundig gir litt færre gjentatte bordkamerater, men tar lengre tid.",
-)
 
 like_store = col2.checkbox("Alle bord har like mange plasser", value=True)
 if like_store:
@@ -146,7 +141,6 @@ if knapp1.button("Generer bordfordeling", type="primary", width="stretch"):
         linje = st.progress(0.0, text="Lager fordeling …")
         uker, stat = generer_uker(
             stipper, elever, plasser_per_bord, int(minimum), antall_uker,
-            innsats=INNSATS[innsats],
             framdrift=lambda i, n: linje.progress(i / n, text=f"Uke {i} av {n} ferdig"),
         )
         linje.empty()
