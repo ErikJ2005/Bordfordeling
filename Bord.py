@@ -5,8 +5,11 @@
 # Publisert via index.html (stlite) kjører hele appen i brukerens nettleser,
 # så navnene sendes ikke til noen server i det hele tatt.
 
+import csv
+import difflib
 import io
 import zipfile
+from collections import Counter
 
 import pandas as pd
 import streamlit as st
@@ -18,30 +21,109 @@ st.set_page_config(page_title="Bordfordeling", layout="wide")
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def les_navneliste(fil):
-    """Leser Excel/CSV med kolonnene 'Elever' og (valgfritt) 'Stipp'."""
-    if fil.name.lower().endswith(".csv"):
-        raw = fil.getvalue()
-        try:
-            tekst = raw.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            tekst = raw.decode("cp1252")
-        df = pd.read_csv(io.StringIO(tekst), sep=None, engine="python", dtype=str)
-    else:
-        df = pd.read_excel(fil, engine="openpyxl", dtype=str)
+def _norm(verdi):
+    """Tekst uten mellomrom i endene og med små bokstaver ('' for tomme celler)."""
+    return "" if pd.isna(verdi) else str(verdi).strip().lower()
 
-    df.columns = [str(c).strip() for c in df.columns]
-    if "Elever" not in df.columns:
-        raise FordelingsFeil("Fila må ha en kolonne som heter «Elever».")
-    rolle = df["Stipp"] if "Stipp" in df.columns else pd.Series([""] * len(df))
-    # Les navn og rolle rad for rad, så kolonnene ikke kommer i utakt
+
+def _les_ark(fil):
+    """Returnerer {arknavn: rutenett} uten å tolke noen rad som overskrift."""
+    try:
+        if fil.name.lower().endswith(".csv"):
+            raw = fil.getvalue()
+            try:
+                tekst = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                tekst = raw.decode("cp1252")
+            # Norsk Excel lagrer ofte CSV med semikolon: bruk det mest brukte skilletegnet
+            skilletegn = max(",;\t", key=tekst.count)
+            return {"CSV": pd.DataFrame(list(csv.reader(io.StringIO(tekst), delimiter=skilletegn)))}
+        return pd.read_excel(fil, sheet_name=None, header=None, dtype=str, engine="openpyxl")
+    except Exception as e:
+        raise FordelingsFeil(
+            "Kunne ikke lese fila. Sjekk at det er en Excel-fil (.xlsx) eller en "
+            "CSV-fil, og at den ikke er skadet eller passordbeskyttet."
+        ) from e
+
+
+def _finn_overskrift(ark, maks_rader=20):
+    """Finner første ark og rad som har en celle med «Elever»."""
+    for arknavn, df in ark.items():
+        for i in range(min(len(df), maks_rader)):
+            rad = [_norm(v) for v in df.iloc[i]]
+            if "elever" in rad:
+                return arknavn, df, i, rad
+    return None
+
+
+def les_navneliste(fil):
+    """Leser Excel/CSV med kolonnene «Elever» og (valgfritt) «Stipp».
+
+    Store/små bokstaver i overskriftene spiller ingen rolle, rader over
+    overskriften (f.eks. en tittel) hoppes over, og alle ark søkes gjennom.
+    Returnerer (stipper, elever, advarsler).
+    """
+    ark = _les_ark(fil)
+    funnet = _finn_overskrift(ark)
+    if funnet is None:
+        alle = {_norm(v): str(v).strip() for df in ark.values()
+                for v in df.head(20).to_numpy().ravel() if _norm(v)}
+        lik = difflib.get_close_matches("elever", list(alle), n=1, cutoff=0.6)
+        hint = f" Fant «{alle[lik[0]]}» – skal den hete «Elever»?" if lik else ""
+        raise FordelingsFeil(
+            "Fant ingen kolonne som heter «Elever» i fila. Overskriften må stå "
+            "i en egen rad over navnene." + hint
+        )
+    arknavn, df, rad_nr, overskrifter = funnet
+    advarsler = []
+
+    kol_elev = overskrifter.index("elever")
+    kol_stipp = overskrifter.index("stipp") if "stipp" in overskrifter else None
+    if kol_stipp is None:
+        andre = {h: str(df.iat[rad_nr, k]).strip() for k, h in enumerate(overskrifter)
+                 if h and k != kol_elev}
+        lik = difflib.get_close_matches("stipp", list(andre), n=1, cutoff=0.6)
+        if lik:
+            advarsler.append(
+                f"Fant ingen kolonne «Stipp», men kolonnen «{andre[lik[0]]}» ligner. "
+                "Alle er derfor behandlet som vanlige elever. Rett overskriften til "
+                "«Stipp» hvis det var meningen."
+            )
+
     stipper, elever = [], []
-    for navn, r in zip(df["Elever"].fillna(""), rolle.fillna("")):
-        navn, r = str(navn).strip(), str(r).strip().lower()
+    ukjente = {}  # ukjent verdi -> navn
+    for _, rad in df.iloc[rad_nr + 1:].iterrows():
+        navn = "" if pd.isna(rad.iloc[kol_elev]) else str(rad.iloc[kol_elev]).strip()
         if not navn:
             continue
-        (stipper if r == "stipp" else elever).append(navn)
-    return stipper, elever
+        rolle = _norm(rad.iloc[kol_stipp]) if kol_stipp is not None else ""
+        if rolle == "stipp":
+            stipper.append(navn)
+        else:
+            elever.append(navn)
+            if rolle:
+                ukjente.setdefault(str(rad.iloc[kol_stipp]).strip(), []).append(navn)
+
+    if arknavn != next(iter(ark)):
+        advarsler.append(f"Navnene ble lest fra arket «{arknavn}».")
+    for verdi, navn in ukjente.items():
+        advarsler.append(
+            f"Ukjent verdi «{verdi}» i Stipp-kolonnen for {_liste(navn)}. "
+            "De er behandlet som vanlige elever. Bare «stipp» eller tom celle er gyldig."
+        )
+    doble = [n for n, c in Counter(stipper + elever).items() if c > 1]
+    if doble:
+        advarsler.append(
+            f"Disse navnene står flere ganger i lista: {_liste(doble)}. Hver forekomst "
+            "får sin egen plass. Fjern dobbeltføringer, eller skill personene "
+            "med f.eks. etternavn."
+        )
+    return stipper, elever, advarsler
+
+
+def _liste(navn, maks=5):
+    tekst = ", ".join(navn[:maks])
+    return tekst + (f" og {len(navn) - maks} til" if len(navn) > maks else "")
 
 
 def som_dataframe(bordliste):
@@ -88,11 +170,13 @@ EKSEMPEL = pd.DataFrame({
 
 with st.expander("Hvordan skal fila se ut? (se eksempel)", expanded=True):
     st.markdown(
-        "Last opp en Excel-fil (`.xlsx`) eller CSV. Første rad må være overskrifter:\n\n"
+        "Last opp en Excel-fil (`.xlsx`) eller CSV med disse overskriftene:\n\n"
         "- **Elever** – ett navn per rad (påkrevd).\n"
         "- **Stipp** – valgfri. La cellen stå tom for vanlige elever, skriv `stipp` "
         "for personer som skal spres utover bordene (helst én per bord). "
-        "Alle i lista får bordplass."
+        "Alle i lista får bordplass.\n\n"
+        "Store og små bokstaver spiller ingen rolle, andre kolonner hoppes over, og "
+        "navnelista kan ligge i hvilket som helst ark."
     )
     eks1, eks2 = st.columns([2, 1])
     eks1.dataframe(EKSEMPEL, hide_index=True, width="stretch")
@@ -136,7 +220,7 @@ if knapp1.button("Generer bordfordeling", type="primary", width="stretch"):
         st.error("Siste uke kan ikke være før første uke.")
         st.stop()
     try:
-        stipper, elever = les_navneliste(elevfil)
+        stipper, elever, advarsler = les_navneliste(elevfil)
         antall_uker = int(slutt_uke - start_uke + 1)
         linje = st.progress(0.0, text="Lager fordeling …")
         uker, stat = generer_uker(
@@ -148,13 +232,13 @@ if knapp1.button("Generer bordfordeling", type="primary", width="stretch"):
         st.error(str(e))
         st.stop()
     except Exception as e:  # noqa: BLE001 – vis en lesbar feil, ikke navn/data
-        st.error(f"Kunne ikke lese fila: {type(e).__name__}")
+        st.error(f"Noe gikk galt ({type(e).__name__}). Sjekk fila og innstillingene.")
         st.stop()
 
     tabeller = {f"Uke {int(start_uke) + i}": som_dataframe(b) for i, b in enumerate(uker)}
     oversikt = pd.DataFrame(stat["per_person"], columns=["Navn", "Antall ulike bordkamerater"])
     st.session_state["resultat"] = {
-        "tabeller": tabeller, "stat": stat,
+        "tabeller": tabeller, "stat": stat, "advarsler": advarsler,
         "zip": lag_zip(tabeller),
         "xlsx": lag_excel({**tabeller, "Oversikt": oversikt}),
     }
@@ -164,6 +248,8 @@ if res:
     stat, tabeller = res["stat"], res["tabeller"]
     ulike = [u for _, u in stat["per_person"]]
     st.success("Bordfordeling generert!")
+    for advarsel in res["advarsler"]:
+        st.warning(advarsel, icon="⚠️")
     m1, m2, m3 = st.columns(3)
     m1.metric("Snitt ulike bordkamerater", f"{sum(ulike) / len(ulike):.1f}")
     m2.metric("Færrest ulike bordkamerater", min(ulike))

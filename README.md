@@ -28,6 +28,12 @@ Excel (`.xlsx`) eller CSV med kolonnene:
 
 Alle som står i lista får bordplass.
 
+Store og små bokstaver i overskriftene spiller ingen rolle, andre kolonner og
+en tittelrad over overskriftene hoppes over, og navnelista kan ligge i
+hvilket som helst ark. Appen advarer om ukjente verdier i Stipp-kolonnen,
+navn som står flere ganger, og en kolonne som ligner «Stipp» men er stavet
+annerledes.
+
 ## Publisere gratis med GitHub Pages (anbefalt)
 
 1. Slå sammen endringene til `main`.
