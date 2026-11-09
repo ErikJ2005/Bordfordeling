@@ -169,7 +169,7 @@ def _fordel_en_uke(antall_stipper, plan, W, rng, iterasjoner):
 
 
 def generer_uker(stipper, elever, plasser_per_bord, minimum, antall_uker,
-                 innsats=1.0, seed=None, framdrift=None):
+                 seed=None, framdrift=None):
     """Lag bordfordeling for flere uker.
 
     Returnerer en liste (én per uke) med lister av bord. Hvert bord er
@@ -182,7 +182,7 @@ def generer_uker(stipper, elever, plasser_per_bord, minimum, antall_uker,
     treff = [[0] * n for _ in range(n)]
     resultat = []
 
-    iterasjoner = int(innsats * max(5000, 400 * n))
+    iterasjoner = max(3000, 240 * n)
     omstarter = 3
 
     for uke in range(antall_uker):
